@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Encrypt Message To Github User</title>
+  <style>
+    * {
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    code,
+    pre,
+    textarea {
+      font-family: 'Courier New', Courier, monospace;
+    }
+
+    label {
+      font-weight: bold;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/node-forge@1.3.0/dist/forge.min.js"></script>
+  <script>
+    async function findUser() {
+      const usernameInput = document.getElementById('username');
+      const username = usernameInput.value;
+      const response = await fetch(`https://api.github.com/users/${username}/keys`);
+      if (response.ok) {
+        const responseData = await response.json();
+        sshRsaPublicKeys = responseData
+          .filter(keyObj => keyObj.key.startsWith('ssh-rsa'))
+        if (sshRsaPublicKeys[0]) {
+          const rsaPublicKeys = await sshToPem(sshRsaPublicKeys[0].key);
+          const rsaPublicTextarea = document.getElementById('rsapublickey');
+          rsaPublicTextarea.innerText = rsaPublicKeys;
+          if (rsaPublicKeys.length > 0) {
+            usernameInput.disabled = true;
+          }
+        } else {
+          console.error('User does not have an RSA public key', responseData);
+          alert('User does not have an RSA public key');
+        }
+      } else {
+        console.error('User not found or error fetching data', response);
+        alert('User not found or error fetching data');
+      }
+      // Avoid the form refreshing the page
+      return false;
+    }
+
+    async function sshToPem(sshKey) {
+      try {
+        const response = await fetch('', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: sshKey
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return data.pem_key || '';
+        } else {
+          console.error('Error converting SSH key to PEM:', response.statusText);
+          alert('Error converting SSH key to PEM');
+          return '';
+        }
+      } catch (error) {
+        console.error('Error in sshToPem:', error);
+        alert('Error in sshToPem');
+        return '';
+      }
+    }
+
+    function handleUserKeyUp(event) {
+      if (event.key === 'Enter') {
+        findUser();
+      }
+    }
+
+    function resetUser() {
+      const usernameInput = document.getElementById('username');
+      usernameInput.value = '';
+      usernameInput.disabled = false;
+      document.getElementById('message').value = '';
+      document.getElementById('rsapublickey').innerText = '';
+      document.getElementById('cipher').value = '';
+    }
+
+    function encryptMessage() {
+      const publicKeyStr = document.getElementById('rsapublickey').innerText;
+      if (publicKeyStr.length === 0) {
+        alert('Please find a user first.');
+        return;
+      }
+
+      try {
+        const forgePublicKey = forge.pki.publicKeyFromPem(publicKeyStr);
+        const messageInput = document.getElementById('message');
+        const plaintextMessage = messageInput.value;
+
+        if (!plaintextMessage) {
+          alert('Please enter a message to encrypt.');
+          return;
+        }
+
+        var paddedMessage = plaintextMessage;
+        while (paddedMessage.length < 128) {
+          paddedMessage += ' ';
+        }
+
+        // generate and encapsulate a 16-byte secret key
+        var kdf1 = new forge.kem.kdf1(forge.md.sha1.create());
+        var kem = forge.kem.rsa.create(kdf1);
+        var result = kem.encrypt(forgePublicKey, 16);
+        // result has 'encapsulation' and 'key'
+
+        // encrypt some bytes
+        var iv = forge.random.getBytesSync(12);
+        var cipher = forge.cipher.createCipher('AES-GCM', result.key);
+        cipher.start({ iv: iv });
+        cipher.update(forge.util.createBuffer(paddedMessage));
+        cipher.finish();
+        var encrypted = cipher.output.getBytes();
+        var tag = cipher.mode.tag.getBytes();
+
+        // send 'encrypted', 'iv', 'tag', and result.encapsulation to recipient
+        document.getElementById('cipher').value = JSON.stringify({
+          encrypted: btoa(encrypted),
+          iv: btoa(iv),
+          tag: btoa(tag),
+          encapsulation: btoa(result.encapsulation),
+        });
+      } catch (error) {
+        console.error('Error encrypting message:', error);
+        alert('Failed to read public key. Please ensure the key is in the correct format.');
+      }
+    }
+
+  </script>
+</head>
+
+<body>
+  <h1>Encrypt a message to a Github User's RSA public key</h1>
+
+  <p>If a Github user has a RSA public key, you can generate an encrypted message that they can decrypt with their
+    RSA private key. It uses the first RSA public key returned by Github's API if there are multiple.</p>
+
+  <label for="message">Message:</label><br>
+  <textarea id="message" name="message" rows="15" cols="100" required></textarea><br><br>
+
+  &downarrow;<br><br>
+
+  <form onsubmit="return false;">
+    <label for="username">Github Username:</label>
+    <input type="text" id="username" name="username" required onkeyup="handleUserKeyUp(event)">
+    <button type="button" onclick="findUser()">Find</button>
+    <button type="button" onclick="resetUser()">Reset</button>
+    <br><br>
+  </form>
+  <label for="rsapublickey">RSA Public Key:</label><br>
+  <pre id="rsapublickey" name="rsapublickey" rows="15" cols="100" disabled style="border: solid 1px grey"></pre><br><br>
+
+  <button type="button" onclick="encryptMessage()">Encrypt</button><br><br>
+
+  &downarrow;<br><br>
+
+  <label for="cipher">Ciphertext Message:</label><br>
+  <textarea id="cipher" name="cipher" rows="15" cols="100" disabled></textarea><br><br>
+
+  Copy the "Ciphertext Message" and send it to the user.<br><br>
+
+  The receiver can try decrypting with instructions from <a href="/decrypt">the decrypt page</a>
+
+</body>
+
+</html>

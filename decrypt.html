@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decrypt Message</title>
+  <style>
+    * {
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    code,
+    pre,
+    textarea {
+      font-family: 'Courier New', Courier, monospace;
+    }
+
+    label {
+      font-weight: bold;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/node-forge@1.3.0/dist/forge.min.js"></script>
+  <script>
+    function decryptMessage() {
+      const cipherInput = document.getElementById('cipher');
+      const privateKeyInput = document.getElementById('rsapprivatekey');
+      const decryptedOutput = document.getElementById('decrypted');
+
+      const encryptedMessageBase64 = cipherInput.value;
+      const privateKeyPem = privateKeyInput.value;
+
+      if (!encryptedMessageBase64) {
+        alert('Please enter a ciphertext message to decrypt.');
+        return;
+      }
+
+      if (!privateKeyPem) {
+        alert('Please enter the RSA private key for decryption.');
+        return;
+      }
+
+      const forgePrivateKey = forge.pki.privateKeyFromPem(privateKeyPem);
+      cipherObj = JSON.parse(cipherInput.value);
+      // decrypt encapsulated 16-byte secret key
+      var kdf1 = new forge.kem.kdf1(forge.md.sha1.create());
+      var kem = forge.kem.rsa.create(kdf1);
+      var key = kem.decrypt(forgePrivateKey, atob(cipherObj.encapsulation), 16);
+
+      // decrypt some bytes
+      var decipher = forge.cipher.createDecipher('AES-GCM', key);
+      decipher.start({ iv: atob(cipherObj.iv), tag: atob(cipherObj.tag) });
+      decipher.update(forge.util.createBuffer(atob(cipherObj.encrypted)));
+      var pass = decipher.finish();
+      // pass is false if there was a failure (eg: authentication tag didn't match)
+      if (pass) {
+        decryptedOutput.value = decipher.output.getBytes();
+      }
+    }
+
+  </script>
+</head>
+
+<body>
+  <h1>Decrypt a message with your RSA private key</h1>
+
+  <p style="color:red; font-weight:bold;">WARNING: This is provided as convenience and demo, you should NOT trust that this page is secure.</p>
+
+  <label for="cipher">Ciphertext Message:</label><br>
+  <textarea id="cipher" name="cipher" rows="15" cols="100"></textarea><br><br>
+
+  &downarrow;<br><br>
+
+  <label for="rsapprivatekey">RSA Private Key:</label><br>
+  <p>NOTE: By default, SSH private keys (like <code>id_rsa</code>) are NOT in RSA format. To convert:</p>
+  <ol>
+    <li>Copy it to a temp file so original won't be overwritten: <code>cp id_rsa rsaprivatekey.tmp</code></li>
+    <li>Use ssh-keygen to convert the temp file: <code>ssh-keygen -p -m pem -N "" -f rsaprivatekey.tmp</code></li>
+    <li>The converted RSA private key will be in <code>rsaprivatekey.tmp</code></li>
+  </ol>
+  <textarea id="rsapprivatekey" name="rsapprivatekey" rows="15" cols="100"
+    style="white-space: nowrap; overflow-x: scroll;"></textarea><br><br>
+
+  <button type="button" onclick="decryptMessage()">Decrypt</button><br><br>
+
+  &downarrow;<br><br>
+
+  <label for="decrypted">Decrypted Message:</label><br>
+  <textarea id="decrypted" name="decrypted" rows="15" cols="100" disabled></textarea><br><br>
+
+  <label>ALTERNATIVELY:</label>
+  <p>There is a <code>decrypt.js</code> command-line script that you can use offline:</p>
+  <p>1. Install the required depdencies</p>
+  <ul>
+    <li><code>npm i node-forge</code></li>
+  </ul>
+  <p>2. At this point you can block outbound network connections</p>
+  <p>3. Save the ciphertext in a file named <code>ciphertext.txt</code></p>
+  <p>4. Save your SSH private key in a file named <code>id_rsa</code></p>
+  <p>5. Run it from your command line:</p>
+  <ul>
+    <li><code>node  decrypt.js  id_rsa  ciphertext.txt</code></li>
+  </ul>
+  <p>The decrypted message will be printed to the terminal output</p>
+
+</body>
+
+</html>
